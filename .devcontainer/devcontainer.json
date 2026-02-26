@@ -1,0 +1,20 @@
+{
+  "name": "NITCbase",
+  "dockerFile": "../Dockerfile",
+  "workspaceMount": "source=${localWorkspaceFolder}/NITCbase,target=/home/nitcbase/NITCbase,type=bind",
+  "workspaceFolder": "/home/nitcbase/NITCbase",
+  "remoteUser": "nitcbase",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-themes",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "C_Cpp.default.compilerPath": "/usr/bin/gcc"
+      }
+    }
+  }
+}

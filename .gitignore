@@ -1,0 +1,11 @@
+# Binary files and build artifacts
+NITCbase/Disk/
+NITCbase/XFS_Interface/*.o
+NITCbase/mynitcbase/*.o
+NITCbase/mynitcbase/nitcbase
+NITCbase/mynitcbase/nitcbase-debug
+NITCbase/Files/Output_Files/*
+NITCbase/Files/Input_Files/*
+
+# Don't commit the actual disk file
+NITCbase/Disk/disk.xfs
