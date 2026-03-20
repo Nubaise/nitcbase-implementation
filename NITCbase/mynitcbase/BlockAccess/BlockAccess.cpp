@@ -245,3 +245,129 @@ int BlockAccess::renameAttribute(char relName[ATTR_SIZE], char currAttrName[ATTR
         }
     }
 }
+
+int BlockAccess::insert(int relId, Attribute *record)
+{
+    // get the relation catalog entry
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+
+    int blockNum = relCatEntry.firstBlk;
+    RecId rec_id = {-1, -1};
+    int numOfSlots = relCatEntry.numSlotsPerBlk;
+    int numOfAttrs = relCatEntry.numAttrs;
+    int prevBlockNum = -1;
+
+    // traverse existing blocks to find a free slot
+    while (blockNum != -1)
+    {
+        RecBuffer blockBuffer(blockNum);
+
+        HeadInfo head;
+        blockBuffer.getHeader(&head);
+
+        unsigned char slotMap[numOfSlots];
+        blockBuffer.getSlotMap(slotMap);
+
+        // search for a free slot in this block
+        for (int i = 0; i < numOfSlots; i++)
+        {
+            if (slotMap[i] == SLOT_UNOCCUPIED)
+            {
+                rec_id.block = blockNum;
+                rec_id.slot = i;
+                break;
+            }
+        }
+
+        if (rec_id.block != -1)
+            break;
+
+        prevBlockNum = blockNum;
+        blockNum = head.rblock;
+    }
+
+    // no free slot found — allocate a new block
+    if (rec_id.block == -1 && rec_id.slot == -1)
+    {
+        // cannot allocate more blocks for relation catalog
+        if (relId == RELCAT_RELID)
+        {
+            return E_MAXRELATIONS;
+        }
+
+        // allocate a new record block using Constructor1
+        RecBuffer newBlock;
+        int ret = newBlock.getBlockNum();
+
+        if (ret == E_DISKFULL)
+        {
+            return E_DISKFULL;
+        }
+
+        rec_id.block = ret;
+        rec_id.slot = 0;
+
+        // set up header for the new block
+        HeadInfo head;
+        head.blockType = REC;
+        head.pblock = -1;
+        head.lblock = prevBlockNum;
+        head.rblock = -1;
+        head.numEntries = 0;
+        head.numAttrs = numOfAttrs;
+        head.numSlots = numOfSlots;
+        newBlock.setHeader(&head);
+
+        // initialise slotmap — all slots free
+        unsigned char slotMap[numOfSlots];
+        for (int i = 0; i < numOfSlots; i++)
+        {
+            slotMap[i] = SLOT_UNOCCUPIED;
+        }
+        newBlock.setSlotMap(slotMap);
+
+        if (prevBlockNum != -1)
+        {
+            // link previous block to new block
+            RecBuffer prevBlock(prevBlockNum);
+            HeadInfo prevHead;
+            prevBlock.getHeader(&prevHead);
+            prevHead.rblock = rec_id.block;
+            prevBlock.setHeader(&prevHead);
+        }
+        else
+        {
+            // first block of the relation
+            relCatEntry.firstBlk = rec_id.block;
+            RelCacheTable::setRelCatEntry(relId, &relCatEntry);
+        }
+
+        // update lastBlk
+        relCatEntry.lastBlk = rec_id.block;
+        RelCacheTable::setRelCatEntry(relId, &relCatEntry);
+    }
+
+    // insert the record
+    RecBuffer recBuffer(rec_id.block);
+    recBuffer.setRecord(record, rec_id.slot);
+
+    // update slotmap
+    unsigned char slotMap[numOfSlots];
+    recBuffer.getSlotMap(slotMap);
+    slotMap[rec_id.slot] = SLOT_OCCUPIED;
+    recBuffer.setSlotMap(slotMap);
+
+    // update numEntries in header
+    HeadInfo head;
+    recBuffer.getHeader(&head);
+    head.numEntries++;
+    recBuffer.setHeader(&head);
+
+    // update numRecs in relation cache
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+    relCatEntry.numRecs++;
+    RelCacheTable::setRelCatEntry(relId, &relCatEntry);
+
+    return SUCCESS;
+}

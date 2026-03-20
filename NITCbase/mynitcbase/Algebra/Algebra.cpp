@@ -115,3 +115,67 @@ int Algebra::select(char srcRel[ATTR_SIZE], char targetRel[ATTR_SIZE],
 
     return SUCCESS;
 }
+
+int Algebra::insert(char relName[ATTR_SIZE], int attrCount,
+                    char attrValues[][ATTR_SIZE])
+{
+    int relId = OpenRelTable::getRelId(relName);
+    if (relId == E_RELNOTOPEN)
+    {
+        return E_RELNOTOPEN;
+    }
+
+    // cannot insert directly into relation catalog
+    if (relId == RELCAT_RELID)
+    {
+        return E_NOTPERMITTED;
+    }
+
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+
+    // check number of attributes matches
+    if (attrCount != relCatEntry.numAttrs)
+    {
+        return E_NATTRMISMATCH;
+    }
+
+    // trim trailing whitespace/newlines from all string values
+    for (int i = 0; i < attrCount; i++)
+    {
+        int len = strlen(attrValues[i]);
+        while (len > 0 && (attrValues[i][len - 1] == '\n' ||
+                           attrValues[i][len - 1] == '\r' ||
+                           attrValues[i][len - 1] == ' '))
+        {
+            attrValues[i][--len] = '\0';
+        }
+    }
+
+    // convert string values to Attribute type
+    Attribute record[relCatEntry.numAttrs];
+
+    for (int i = 0; i < relCatEntry.numAttrs; i++)
+    {
+        AttrCatEntry attrCatEntry;
+        AttrCacheTable::getAttrCatEntry(relId, i, &attrCatEntry);
+
+        if (attrCatEntry.attrType == NUMBER)
+        {
+            if (isNumber(attrValues[i]))
+            {
+                record[i].nVal = atof(attrValues[i]);
+            }
+            else
+            {
+                return E_ATTRTYPEMISMATCH;
+            }
+        }
+        else
+        {
+            strcpy(record[i].sVal, attrValues[i]);
+        }
+    }
+
+    return BlockAccess::insert(relId, record);
+}

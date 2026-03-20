@@ -1,11 +1,14 @@
 #include "StaticBuffer.h"
+#include "StaticBuffer.h"
+#include <cstring>
 
 unsigned char StaticBuffer::blocks[BUFFER_CAPACITY][BLOCK_SIZE];
 struct BufferMetaInfo StaticBuffer::metainfo[BUFFER_CAPACITY];
+unsigned char StaticBuffer::blockAllocMap[DISK_BLOCKS];
 
 StaticBuffer::StaticBuffer()
 {
-    // initialise all buffer slots
+    // initialise all buffer slots FIRST
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
         metainfo[bufferIndex].free = true;
@@ -13,14 +16,31 @@ StaticBuffer::StaticBuffer()
         metainfo[bufferIndex].timeStamp = -1;
         metainfo[bufferIndex].blockNum = -1;
     }
+
+    // read BAM from disk into blockAllocMap using a temporary buffer
+    // do NOT use blocks[][] for this — blocks[][] is for user data only
+    unsigned char tmpBlock[BLOCK_SIZE];
+    for (int i = 0; i < BLOCK_ALLOCATION_MAP_SIZE; i++)
+    {
+        Disk::readBlock(tmpBlock, i);
+        // copy this BAM block into the correct section of blockAllocMap
+        memcpy(blockAllocMap + (i * BLOCK_SIZE), tmpBlock, BLOCK_SIZE);
+    }
 }
 
-// on system exit, write back all dirty blocks to disk
 StaticBuffer::~StaticBuffer()
 {
+    // write blockAllocMap back to disk blocks 0-3
+    unsigned char tmpBlock[BLOCK_SIZE];
+    for (int i = 0; i < BLOCK_ALLOCATION_MAP_SIZE; i++)
+    {
+        memcpy(tmpBlock, blockAllocMap + (i * BLOCK_SIZE), BLOCK_SIZE);
+        Disk::writeBlock(tmpBlock, i);
+    }
+
+    // write back all dirty blocks to disk
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
-        // if slot is occupied and dirty, write it back to disk
         if (metainfo[bufferIndex].free == false &&
             metainfo[bufferIndex].dirty == true)
         {
@@ -29,7 +49,6 @@ StaticBuffer::~StaticBuffer()
     }
 }
 
-// finds a free buffer slot using LRU replacement if needed
 int StaticBuffer::getFreeBuffer(int blockNum)
 {
     if (blockNum < 0 || blockNum >= DISK_BLOCKS)
@@ -37,8 +56,6 @@ int StaticBuffer::getFreeBuffer(int blockNum)
         return E_OUTOFBOUND;
     }
 
-    // increment timestamp of all occupied buffer slots
-    // this tracks how long since each block was last used
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
         if (metainfo[bufferIndex].free == false)
@@ -49,7 +66,6 @@ int StaticBuffer::getFreeBuffer(int blockNum)
 
     int allocatedBuffer = -1;
 
-    // first try to find a free slot
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
         if (metainfo[bufferIndex].free)
@@ -59,11 +75,9 @@ int StaticBuffer::getFreeBuffer(int blockNum)
         }
     }
 
-    // if no free slot found, use LRU — find the slot with highest timestamp
     if (allocatedBuffer == -1)
     {
         int maxTimestamp = -1;
-
         for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
         {
             if (metainfo[bufferIndex].timeStamp > maxTimestamp)
@@ -72,15 +86,12 @@ int StaticBuffer::getFreeBuffer(int blockNum)
                 allocatedBuffer = bufferIndex;
             }
         }
-
-        // if the LRU block is dirty, write it back to disk before replacing
         if (metainfo[allocatedBuffer].dirty == true)
         {
             Disk::writeBlock(blocks[allocatedBuffer], metainfo[allocatedBuffer].blockNum);
         }
     }
 
-    // set up the metadata for the newly allocated buffer slot
     metainfo[allocatedBuffer].free = false;
     metainfo[allocatedBuffer].dirty = false;
     metainfo[allocatedBuffer].blockNum = blockNum;
@@ -89,8 +100,6 @@ int StaticBuffer::getFreeBuffer(int blockNum)
     return allocatedBuffer;
 }
 
-// returns the buffer index of the slot holding blockNum
-// or E_BLOCKNOTINBUFFER if not in buffer
 int StaticBuffer::getBufferNum(int blockNum)
 {
     if (blockNum < 0 || blockNum >= DISK_BLOCKS)
@@ -110,25 +119,28 @@ int StaticBuffer::getBufferNum(int blockNum)
     return E_BLOCKNOTINBUFFER;
 }
 
-// marks the buffer slot holding blockNum as dirty
-// so it gets written back to disk when replaced or on exit
 int StaticBuffer::setDirtyBit(int blockNum)
 {
-    // find the buffer slot holding this block
     int bufferNum = getBufferNum(blockNum);
 
     if (bufferNum == E_BLOCKNOTINBUFFER)
     {
         return E_BLOCKNOTINBUFFER;
     }
-
     if (bufferNum == E_OUTOFBOUND)
     {
         return E_OUTOFBOUND;
     }
 
-    // mark as dirty
     metainfo[bufferNum].dirty = true;
-
     return SUCCESS;
+}
+
+int StaticBuffer::getStaticBlockType(int blockNum)
+{
+    if (blockNum < 0 || blockNum >= DISK_BLOCKS)
+    {
+        return E_OUTOFBOUND;
+    }
+    return (int)blockAllocMap[blockNum];
 }
