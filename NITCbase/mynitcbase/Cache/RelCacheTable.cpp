@@ -46,3 +46,58 @@ void RelCacheTable::recordToRelCatEntry(union Attribute record[RELCAT_NO_ATTRS],
     // record[5] = #Slots (number)
     relCatEntry->numSlotsPerBlk = (int)record[RELCAT_NO_SLOTS_PER_BLOCK_INDEX].nVal;
 }
+
+/* returns the searchIndex for the relation with the given relId
+   searchIndex stores the rec-id of the last record found during linear search
+   {-1,-1} means search should start from the beginning
+*/
+int RelCacheTable::getSearchIndex(int relId, RecId *searchIndex)
+{
+    // check if relId is valid
+    if (relId < 0 || relId >= MAX_OPEN)
+    {
+        return E_OUTOFBOUND;
+    }
+
+    // check if the relation is open
+    if (relCache[relId] == nullptr)
+    {
+        return E_RELNOTOPEN;
+    }
+
+    // copy the searchIndex from the cache entry to the output argument
+    *searchIndex = relCache[relId]->searchIndex;
+
+    return SUCCESS;
+}
+
+// updates the searchIndex for the relation with the given relId
+int RelCacheTable::setSearchIndex(int relId, RecId *searchIndex)
+{
+    // check if relId is valid
+    if (relId < 0 || relId >= MAX_OPEN)
+    {
+        return E_OUTOFBOUND;
+    }
+
+    // check if the relation is open
+    if (relCache[relId] == nullptr)
+    {
+        return E_RELNOTOPEN;
+    }
+
+    // update the searchIndex in the cache entry
+    relCache[relId]->searchIndex = *searchIndex;
+
+    return SUCCESS;
+}
+
+// resets the searchIndex to {-1,-1} so search starts from the beginning
+int RelCacheTable::resetSearchIndex(int relId)
+{
+    // create a rec-id with {-1,-1} meaning "start from beginning"
+    RecId resetId = {-1, -1};
+
+    // use setSearchIndex to reset it
+    return setSearchIndex(relId, &resetId);
+}

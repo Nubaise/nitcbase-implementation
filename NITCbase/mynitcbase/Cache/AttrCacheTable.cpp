@@ -7,35 +7,37 @@
 // attrCache[1] = linked list of ATTRIBUTECAT's 6 attributes
 AttrCacheEntry *AttrCacheTable::attrCache[MAX_OPEN];
 
-// returns the attribute catalog entry for the attribute at 'attrOffset'
-// in the relation with the given rel-id
-int AttrCacheTable::getAttrCatEntry(int relId, int attrOffset, AttrCatEntry *attrCatBuf)
+/* returns the attribute catalog entry for the attribute with name attrName
+   for the relation with the given relId
+   this is an overload of getAttrCatEntry that searches by name instead of offset
+*/
+int AttrCacheTable::getAttrCatEntry(int relId, char attrName[ATTR_SIZE], AttrCatEntry *attrCatBuf)
 {
-    // rel-id must be between 0 and MAX_OPEN-1
+    // check if relId is valid
     if (relId < 0 || relId >= MAX_OPEN)
     {
         return E_OUTOFBOUND;
     }
 
-    // if there is no entry at this rel-id, the relation is not open
+    // check if the relation is open
     if (attrCache[relId] == nullptr)
     {
         return E_RELNOTOPEN;
     }
 
     // traverse the linked list of attribute entries for this relation
-    // each node in the list = one attribute of the relation
     for (AttrCacheEntry *entry = attrCache[relId]; entry != nullptr; entry = entry->next)
     {
-        if (entry->attrCatEntry.offset == attrOffset)
+        // check if this entry's attribute name matches what we're looking for
+        if (strcmp(entry->attrCatEntry.attrName, attrName) == 0)
         {
-            // found the attribute at the requested offset
+            // found it! copy to output and return
             *attrCatBuf = entry->attrCatEntry;
             return SUCCESS;
         }
     }
 
-    // no attribute found at this offset
+    // no attribute with this name found
     return E_ATTRNOTEXIST;
 }
 
@@ -56,4 +58,35 @@ void AttrCacheTable::recordToAttrCatEntry(union Attribute record[ATTRCAT_NO_ATTR
     attrCatEntry->rootBlock = (int)record[ATTRCAT_ROOT_BLOCK_INDEX].nVal;
     // record[5] = Offset (number) - position of this attribute (0=first, 1=second...)
     attrCatEntry->offset = (int)record[ATTRCAT_OFFSET_INDEX].nVal;
+}
+
+// returns the attribute catalog entry for the attribute at offset attrOffset
+// for the relation with the given relId
+int AttrCacheTable::getAttrCatEntry(int relId, int attrOffset, AttrCatEntry *attrCatBuf)
+{
+    // check if relId is valid
+    if (relId < 0 || relId >= MAX_OPEN)
+    {
+        return E_OUTOFBOUND;
+    }
+
+    // check if the relation is open
+    if (attrCache[relId] == nullptr)
+    {
+        return E_RELNOTOPEN;
+    }
+
+    // traverse the linked list of attribute entries for this relation
+    for (AttrCacheEntry *entry = attrCache[relId]; entry != nullptr; entry = entry->next)
+    {
+        if (entry->attrCatEntry.offset == attrOffset)
+        {
+            // found it! copy to output and return
+            *attrCatBuf = entry->attrCatEntry;
+            return SUCCESS;
+        }
+    }
+
+    // no attribute at this offset
+    return E_ATTRNOTEXIST;
 }

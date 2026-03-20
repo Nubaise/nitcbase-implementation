@@ -97,3 +97,58 @@ int BlockBuffer::loadBlockAndGetBufferPtr(unsigned char **buffPtr)
 
     return SUCCESS;
 }
+
+/* reads the slotmap of this record block into the slotMap array
+   slotMap[i] = SLOT_OCCUPIED or SLOT_UNOCCUPIED for each slot i
+*/
+int RecBuffer::getSlotMap(unsigned char *slotMap)
+{
+    unsigned char *bufferPtr;
+
+    // load the block into buffer and get pointer to it
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS)
+    {
+        return ret;
+    }
+
+    struct HeadInfo head;
+    // get the header to find out how many slots there are
+    this->getHeader(&head);
+
+    int slotCount = head.numSlots;
+
+    // slotmap starts right after the header (at offset HEADER_SIZE)
+    unsigned char *slotMapInBuffer = bufferPtr + HEADER_SIZE;
+
+    // copy slotCount bytes from buffer into slotMap
+    memcpy(slotMap, slotMapInBuffer, slotCount);
+
+    return SUCCESS;
+}
+
+/* compares two attribute values of the given type
+   returns:
+     negative value if attr1 < attr2
+     0              if attr1 == attr2
+     positive value if attr1 > attr2
+*/
+int compareAttrs(union Attribute attr1, union Attribute attr2, int attrType)
+{
+    if (attrType == NUMBER)
+    {
+        // for numbers, just subtract
+        // negative if attr1 < attr2, 0 if equal, positive if attr1 > attr2
+        if (attr1.nVal < attr2.nVal)
+            return -1;
+        if (attr1.nVal == attr2.nVal)
+            return 0;
+        return 1;
+    }
+    else
+    {
+        // for strings, use strcmp
+        // strcmp returns negative, 0, or positive just like we need
+        return strcmp(attr1.sVal, attr2.sVal);
+    }
+}

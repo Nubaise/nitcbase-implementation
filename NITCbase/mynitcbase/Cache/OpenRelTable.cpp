@@ -196,3 +196,31 @@ OpenRelTable::~OpenRelTable()
         }
     }
 }
+
+/* returns the rel-id of the relation with the given name
+   for now we only handle RELATIONCAT and ATTRIBUTECAT
+   we will extend this in later stages
+*/
+int OpenRelTable::getRelId(char relName[ATTR_SIZE])
+{
+
+    // if it's the relation catalog, return rel-id 0
+    if (strcmp(relName, RELCAT_RELNAME) == 0)
+    {
+        return RELCAT_RELID;
+    }
+
+    // if it's the attribute catalog, return rel-id 1
+    if (strcmp(relName, ATTRCAT_RELNAME) == 0)
+    {
+        return ATTRCAT_RELID;
+    }
+
+    // hardcoded for now — Students is at rel-id 2
+    if (strcmp(relName, "Students") == 0)
+    {
+        return 2;
+    }
+
+    return E_RELNOTOPEN;
+}
