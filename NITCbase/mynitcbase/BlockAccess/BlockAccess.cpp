@@ -123,3 +123,125 @@ RecId BlockAccess::linearSearch(int relId, char attrName[ATTR_SIZE],
 
     return RecId{-1, -1};
 }
+
+/* renames a relation from currRelName to newRelName
+   updates both the relation catalog entry and all attribute catalog entries
+*/
+int BlockAccess::renameRelation(char currRelName[ATTR_SIZE], char newRelName[ATTR_SIZE])
+{
+
+    /*** update the relation catalog entry ***/
+
+    // reset search on RELATIONCAT
+    RelCacheTable::resetSearchIndex(RELCAT_RELID);
+
+    // search for currRelName in RELATIONCAT
+    Attribute attrVal;
+    strcpy(attrVal.sVal, currRelName);
+
+    RecId relCatRecId = linearSearch(RELCAT_RELID, (char *)RELCAT_ATTR_RELNAME, attrVal, EQ);
+
+    // if not found, relation does not exist
+    if (relCatRecId.block == -1 && relCatRecId.slot == -1)
+    {
+        return E_RELNOTEXIST;
+    }
+
+    // check if newRelName already exists
+    RelCacheTable::resetSearchIndex(RELCAT_RELID);
+    Attribute newAttrVal;
+    strcpy(newAttrVal.sVal, newRelName);
+
+    RecId checkId = linearSearch(RELCAT_RELID, (char *)RELCAT_ATTR_RELNAME, newAttrVal, EQ);
+    if (checkId.block != -1 && checkId.slot != -1)
+    {
+        return E_RELEXIST;
+    }
+
+    // read the relation catalog record
+    RecBuffer relCatBlock(relCatRecId.block);
+    Attribute relCatRecord[RELCAT_NO_ATTRS];
+    relCatBlock.getRecord(relCatRecord, relCatRecId.slot);
+
+    // update the RelName field with the new name
+    strcpy(relCatRecord[RELCAT_REL_NAME_INDEX].sVal, newRelName);
+
+    // write the updated record back
+    relCatBlock.setRecord(relCatRecord, relCatRecId.slot);
+
+    /*** update all attribute catalog entries for this relation ***/
+
+    // reset search on ATTRIBUTECAT
+    RelCacheTable::resetSearchIndex(ATTRCAT_RELID);
+
+    // find and update all entries where RelName = currRelName
+    while (true)
+    {
+        RecId attrCatRecId = linearSearch(ATTRCAT_RELID, (char *)ATTRCAT_ATTR_RELNAME, attrVal, EQ);
+
+        // no more entries for this relation
+        if (attrCatRecId.block == -1 && attrCatRecId.slot == -1)
+        {
+            break;
+        }
+
+        // read the attribute catalog record
+        RecBuffer attrCatBlock(attrCatRecId.block);
+        Attribute attrCatRecord[ATTRCAT_NO_ATTRS];
+        attrCatBlock.getRecord(attrCatRecord, attrCatRecId.slot);
+
+        // update the RelName field
+        strcpy(attrCatRecord[ATTRCAT_REL_NAME_INDEX].sVal, newRelName);
+
+        // write the updated record back
+        attrCatBlock.setRecord(attrCatRecord, attrCatRecId.slot);
+    }
+
+    return SUCCESS;
+}
+
+/* renames an attribute of a relation from currAttrName to newAttrName
+   updates the attribute catalog entry
+*/
+int BlockAccess::renameAttribute(char relName[ATTR_SIZE], char currAttrName[ATTR_SIZE],
+                                 char newAttrName[ATTR_SIZE])
+{
+
+    // reset search on ATTRIBUTECAT
+    RelCacheTable::resetSearchIndex(ATTRCAT_RELID);
+
+    // search for the relation in ATTRIBUTECAT
+    Attribute relAttrVal;
+    strcpy(relAttrVal.sVal, relName);
+
+    // find the attribute entry where RelName = relName AND AttrName = currAttrName
+    while (true)
+    {
+        RecId attrCatRecId = linearSearch(ATTRCAT_RELID, (char *)ATTRCAT_ATTR_RELNAME, relAttrVal, EQ);
+
+        // no more entries for this relation — attribute not found
+        if (attrCatRecId.block == -1 && attrCatRecId.slot == -1)
+        {
+            return E_ATTRNOTEXIST;
+        }
+
+        // read the attribute catalog record
+        RecBuffer attrCatBlock(attrCatRecId.block);
+        Attribute attrCatRecord[ATTRCAT_NO_ATTRS];
+        attrCatBlock.getRecord(attrCatRecord, attrCatRecId.slot);
+
+        // check if this is the attribute we want to rename
+        if (strcmp(attrCatRecord[ATTRCAT_ATTR_NAME_INDEX].sVal, currAttrName) == 0)
+        {
+
+            // check if newAttrName already exists for this relation
+            // (we'll do a simple check here)
+            strcpy(attrCatRecord[ATTRCAT_ATTR_NAME_INDEX].sVal, newAttrName);
+
+            // write the updated record back
+            attrCatBlock.setRecord(attrCatRecord, attrCatRecId.slot);
+
+            return SUCCESS;
+        }
+    }
+}

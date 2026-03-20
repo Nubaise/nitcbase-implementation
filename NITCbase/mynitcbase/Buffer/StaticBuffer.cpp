@@ -1,75 +1,134 @@
 #include "StaticBuffer.h"
 
-// these are the static member fields declared in StaticBuffer.h
-// they need to be explicitly defined here outside the class
-// blocks[][] is the actual buffer - 32 slots, each holding one full disk block (2048 bytes)
 unsigned char StaticBuffer::blocks[BUFFER_CAPACITY][BLOCK_SIZE];
-// metainfo[] stores metadata about each of the 32 buffer slots
 struct BufferMetaInfo StaticBuffer::metainfo[BUFFER_CAPACITY];
 
 StaticBuffer::StaticBuffer()
 {
-    // at startup, all 32 buffer slots are empty/free
-    // so we mark all of them as free
+    // initialise all buffer slots
     for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
         metainfo[bufferIndex].free = true;
+        metainfo[bufferIndex].dirty = false;
+        metainfo[bufferIndex].timeStamp = -1;
+        metainfo[bufferIndex].blockNum = -1;
     }
 }
 
-// we are not implementing write-back yet (that comes in stage 6)
-// so destructor is empty for now
-StaticBuffer::~StaticBuffer() {}
+// on system exit, write back all dirty blocks to disk
+StaticBuffer::~StaticBuffer()
+{
+    for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
+    {
+        // if slot is occupied and dirty, write it back to disk
+        if (metainfo[bufferIndex].free == false &&
+            metainfo[bufferIndex].dirty == true)
+        {
+            Disk::writeBlock(blocks[bufferIndex], metainfo[bufferIndex].blockNum);
+        }
+    }
+}
 
-// finds a free slot in the buffer for a given disk block
-// returns the index of the free slot, or E_OUTOFBOUND if blockNum is invalid
+// finds a free buffer slot using LRU replacement if needed
 int StaticBuffer::getFreeBuffer(int blockNum)
 {
-    // check if the block number is valid
-    if (blockNum < 0 || blockNum > DISK_BLOCKS)
+    if (blockNum < 0 || blockNum >= DISK_BLOCKS)
     {
         return E_OUTOFBOUND;
+    }
+
+    // increment timestamp of all occupied buffer slots
+    // this tracks how long since each block was last used
+    for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
+    {
+        if (metainfo[bufferIndex].free == false)
+        {
+            metainfo[bufferIndex].timeStamp++;
+        }
     }
 
     int allocatedBuffer = -1;
 
-    // scan through all 32 buffer slots to find a free one
-    for (int i = 0; i < BUFFER_CAPACITY; i++)
+    // first try to find a free slot
+    for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
-        if (metainfo[i].free)
+        if (metainfo[bufferIndex].free)
         {
-            allocatedBuffer = i;
-            break; // found a free slot, stop searching
+            allocatedBuffer = bufferIndex;
+            break;
         }
     }
 
-    // mark this slot as occupied and remember which disk block it holds
+    // if no free slot found, use LRU — find the slot with highest timestamp
+    if (allocatedBuffer == -1)
+    {
+        int maxTimestamp = -1;
+
+        for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
+        {
+            if (metainfo[bufferIndex].timeStamp > maxTimestamp)
+            {
+                maxTimestamp = metainfo[bufferIndex].timeStamp;
+                allocatedBuffer = bufferIndex;
+            }
+        }
+
+        // if the LRU block is dirty, write it back to disk before replacing
+        if (metainfo[allocatedBuffer].dirty == true)
+        {
+            Disk::writeBlock(blocks[allocatedBuffer], metainfo[allocatedBuffer].blockNum);
+        }
+    }
+
+    // set up the metadata for the newly allocated buffer slot
     metainfo[allocatedBuffer].free = false;
+    metainfo[allocatedBuffer].dirty = false;
     metainfo[allocatedBuffer].blockNum = blockNum;
+    metainfo[allocatedBuffer].timeStamp = 0;
 
     return allocatedBuffer;
 }
 
-// checks if a disk block is already loaded in the buffer
-// returns the buffer index if found, or E_BLOCKNOTINBUFFER if not found
+// returns the buffer index of the slot holding blockNum
+// or E_BLOCKNOTINBUFFER if not in buffer
 int StaticBuffer::getBufferNum(int blockNum)
 {
-    // check if the block number is valid
-    if (blockNum < 0 || blockNum > DISK_BLOCKS)
+    if (blockNum < 0 || blockNum >= DISK_BLOCKS)
     {
         return E_OUTOFBOUND;
     }
 
-    // scan through all 32 buffer slots
-    for (int i = 0; i < BUFFER_CAPACITY; i++)
+    for (int bufferIndex = 0; bufferIndex < BUFFER_CAPACITY; bufferIndex++)
     {
-        // check if this slot is occupied AND holds the block we're looking for
-        if (metainfo[i].free == false && metainfo[i].blockNum == blockNum)
+        if (metainfo[bufferIndex].free == false &&
+            metainfo[bufferIndex].blockNum == blockNum)
         {
-            return i; // found it! return the buffer index
+            return bufferIndex;
         }
     }
 
-    // block is not in the buffer
     return E_BLOCKNOTINBUFFER;
+}
+
+// marks the buffer slot holding blockNum as dirty
+// so it gets written back to disk when replaced or on exit
+int StaticBuffer::setDirtyBit(int blockNum)
+{
+    // find the buffer slot holding this block
+    int bufferNum = getBufferNum(blockNum);
+
+    if (bufferNum == E_BLOCKNOTINBUFFER)
+    {
+        return E_BLOCKNOTINBUFFER;
+    }
+
+    if (bufferNum == E_OUTOFBOUND)
+    {
+        return E_OUTOFBOUND;
+    }
+
+    // mark as dirty
+    metainfo[bufferNum].dirty = true;
+
+    return SUCCESS;
 }

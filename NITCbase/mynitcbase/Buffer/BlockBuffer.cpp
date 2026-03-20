@@ -71,16 +71,15 @@ int RecBuffer::getRecord(union Attribute *rec, int slotNum)
 
 // loads the block into the buffer if not already there
 // sets *buffPtr to point to the buffer slot holding this block
+// updated to handle timestamps for LRU
 int BlockBuffer::loadBlockAndGetBufferPtr(unsigned char **buffPtr)
 {
-    // check if this block is already in the buffer
+    // check if block is already in buffer
     int bufferNum = StaticBuffer::getBufferNum(this->blockNum);
 
     if (bufferNum == E_BLOCKNOTINBUFFER)
     {
-        // block is not in buffer, so we need to load it from disk
-
-        // get a free buffer slot for this block
+        // not in buffer — get a free slot (LRU if needed)
         bufferNum = StaticBuffer::getFreeBuffer(this->blockNum);
 
         if (bufferNum == E_OUTOFBOUND)
@@ -91,9 +90,61 @@ int BlockBuffer::loadBlockAndGetBufferPtr(unsigned char **buffPtr)
         // read the block from disk into the free buffer slot
         Disk::readBlock(StaticBuffer::blocks[bufferNum], this->blockNum);
     }
+    else
+    {
+        // block is already in buffer
+        // reset its timestamp to 0 (most recently used)
+        // and increment all other occupied slots' timestamps
+        for (int i = 0; i < BUFFER_CAPACITY; i++)
+        {
+            if (StaticBuffer::metainfo[i].free == false)
+            {
+                StaticBuffer::metainfo[i].timeStamp++;
+            }
+        }
+        StaticBuffer::metainfo[bufferNum].timeStamp = 0;
+    }
 
-    // set the pointer to this buffer slot so the caller can read from it
     *buffPtr = StaticBuffer::blocks[bufferNum];
+
+    return SUCCESS;
+}
+
+/* writes the record at slotNum in this block from the rec array
+   marks the buffer as dirty so changes get written back to disk
+*/
+int RecBuffer::setRecord(union Attribute *rec, int slotNum)
+{
+    unsigned char *bufferPtr;
+
+    // load block into buffer and get pointer
+    int ret = loadBlockAndGetBufferPtr(&bufferPtr);
+    if (ret != SUCCESS)
+    {
+        return ret;
+    }
+
+    struct HeadInfo head;
+    this->getHeader(&head);
+
+    int attrCount = head.numAttrs;
+    int slotCount = head.numSlots;
+
+    // check if slotNum is valid
+    if (slotNum < 0 || slotNum >= slotCount)
+    {
+        return E_OUTOFBOUND;
+    }
+
+    // calculate where this slot is in the buffer
+    int recordSize = attrCount * ATTR_SIZE;
+    unsigned char *slotPointer = bufferPtr + HEADER_SIZE + slotCount + (recordSize * slotNum);
+
+    // copy the record into the buffer
+    memcpy(slotPointer, rec, recordSize);
+
+    // mark the buffer as dirty so it gets written back to disk
+    StaticBuffer::setDirtyBit(this->blockNum);
 
     return SUCCESS;
 }
