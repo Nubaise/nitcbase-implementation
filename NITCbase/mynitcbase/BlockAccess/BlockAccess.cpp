@@ -532,3 +532,59 @@ int BlockAccess::deleteRelation(char relName[ATTR_SIZE])
 
     return SUCCESS;
 }
+
+// fetches the next record from the relation (used by Algebra::project)
+// uses searchIndex to track position — call resetSearchIndex before first call
+int BlockAccess::project(int relId, Attribute *record)
+{
+    RecId prevRecId;
+    RelCacheTable::getSearchIndex(relId, &prevRecId);
+
+    int block, slot;
+
+    if (prevRecId.block == -1 && prevRecId.slot == -1)
+    {
+        RelCatEntry relCatEntry;
+        RelCacheTable::getRelCatEntry(relId, &relCatEntry);
+        block = relCatEntry.firstBlk;
+        slot = 0;
+    }
+    else
+    {
+        block = prevRecId.block;
+        slot = prevRecId.slot + 1;
+    }
+
+    while (block != -1)
+    {
+        RecBuffer blockBuffer(block);
+        HeadInfo head;
+        blockBuffer.getHeader(&head);
+
+        unsigned char slotMap[head.numSlots];
+        blockBuffer.getSlotMap(slotMap);
+
+        if (slot >= head.numSlots)
+        {
+            block = head.rblock;
+            slot = 0;
+            continue;
+        }
+
+        if (slotMap[slot] == SLOT_UNOCCUPIED)
+        {
+            slot++;
+            continue;
+        }
+
+        blockBuffer.getRecord(record, slot);
+
+        RecId foundRecId = {block, slot};
+        RelCacheTable::setSearchIndex(relId, &foundRecId);
+
+        return SUCCESS;
+    }
+
+    RelCacheTable::resetSearchIndex(relId);
+    return E_NOTFOUND;
+}
