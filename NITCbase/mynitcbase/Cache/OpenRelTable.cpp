@@ -114,24 +114,43 @@ OpenRelTable::OpenRelTable()
 OpenRelTable::~OpenRelTable()
 {
     // close all open relations from rel-id 2 onwards
-    // (rel-id 0 and 1 are catalogs, handled separately below)
-    // Why start from 2? Because catalogs (0,1) cannot be closed with closeRel
     for (int i = 2; i < MAX_OPEN; i++)
     {
         if (!tableMetaInfo[i].free)
         {
-            // close the relation — this frees the cache memory
             OpenRelTable::closeRel(i);
         }
     }
 
-    // free memory for RELATIONCAT (rel-id 0)
+    /****** write back RELATIONCAT cache if dirty ******/
+    if (RelCacheTable::relCache[RELCAT_RELID]->dirty == true)
+    {
+        Attribute relCatRecord[RELCAT_NO_ATTRS];
+        RelCacheTable::relCatEntryToRecord(
+            &RelCacheTable::relCache[RELCAT_RELID]->relCatEntry, relCatRecord);
+        RecId recId = RelCacheTable::relCache[RELCAT_RELID]->recId;
+        RecBuffer relCatBlock(recId.block);
+        relCatBlock.setRecord(relCatRecord, recId.slot);
+    }
+
+    /****** write back ATTRIBUTECAT cache if dirty ******/
+    if (RelCacheTable::relCache[ATTRCAT_RELID]->dirty == true)
+    {
+        Attribute relCatRecord[RELCAT_NO_ATTRS];
+        RelCacheTable::relCatEntryToRecord(
+            &RelCacheTable::relCache[ATTRCAT_RELID]->relCatEntry, relCatRecord);
+        RecId recId = RelCacheTable::relCache[ATTRCAT_RELID]->recId;
+        RecBuffer relCatBlock(recId.block);
+        relCatBlock.setRecord(relCatRecord, recId.slot);
+    }
+
+    /****** free memory for RELATIONCAT (rel-id 0) ******/
     free(RelCacheTable::relCache[RELCAT_RELID]);
 
-    // free memory for ATTRIBUTECAT (rel-id 1)
+    /****** free memory for ATTRIBUTECAT (rel-id 1) ******/
     free(RelCacheTable::relCache[ATTRCAT_RELID]);
 
-    // free attribute cache linked lists for rel-id 0 and 1
+    /****** free attribute cache linked lists for rel-id 0 and 1 ******/
     for (int i = 0; i <= 1; i++)
     {
         AttrCacheEntry *entry = AttrCacheTable::attrCache[i];

@@ -371,3 +371,164 @@ int BlockAccess::insert(int relId, Attribute *record)
 
     return SUCCESS;
 }
+
+// searches for a record satisfying the condition and copies it to record[]
+int BlockAccess::search(int relId, Attribute *record,
+                        char attrName[ATTR_SIZE], Attribute attrVal, int op)
+{
+    // use linearSearch to find the record
+    RecId recId = linearSearch(relId, attrName, attrVal, op);
+
+    // if no record found
+    if (recId.block == -1 && recId.slot == -1)
+    {
+        return E_NOTFOUND;
+    }
+
+    // copy the record to the output argument
+    RecBuffer blockBuffer(recId.block);
+    blockBuffer.getRecord(record, recId.slot);
+
+    return SUCCESS;
+}
+
+// deletes a relation — frees all its blocks and removes catalog entries
+int BlockAccess::deleteRelation(char relName[ATTR_SIZE])
+{
+
+    /****** find the relation in RELATIONCAT ******/
+    RelCacheTable::resetSearchIndex(RELCAT_RELID);
+
+    Attribute relNameAttr;
+    strcpy(relNameAttr.sVal, relName);
+
+    RecId relCatRecId = linearSearch(
+        RELCAT_RELID, (char *)RELCAT_ATTR_RELNAME, relNameAttr, EQ);
+
+    if (relCatRecId.block == -1 && relCatRecId.slot == -1)
+    {
+        return E_RELNOTEXIST;
+    }
+
+    // read the relation catalog record
+    RecBuffer relCatBlock(relCatRecId.block);
+    Attribute relCatRecord[RELCAT_NO_ATTRS];
+    relCatBlock.getRecord(relCatRecord, relCatRecId.slot);
+
+    // get first block of the relation
+    int firstBlock = (int)relCatRecord[RELCAT_FIRST_BLOCK_INDEX].nVal;
+
+    /****** free all record blocks of the relation ******/
+    int blockNum = firstBlock;
+    while (blockNum != -1)
+    {
+        RecBuffer recBuffer(blockNum);
+        HeadInfo head;
+        recBuffer.getHeader(&head);
+        int nextBlock = head.rblock;
+
+        // release this block
+        recBuffer.releaseBlock();
+
+        blockNum = nextBlock;
+    }
+
+    /****** delete all entries from ATTRIBUTECAT ******/
+    RelCacheTable::resetSearchIndex(ATTRCAT_RELID);
+
+    int numAttrs = (int)relCatRecord[RELCAT_NO_ATTRIBUTES_INDEX].nVal;
+
+    for (int i = 0; i < numAttrs; i++)
+    {
+        RecId attrCatRecId = linearSearch(
+            ATTRCAT_RELID, (char *)ATTRCAT_ATTR_RELNAME, relNameAttr, EQ);
+
+        if (attrCatRecId.block == -1 && attrCatRecId.slot == -1)
+        {
+            break;
+        }
+
+        // get the block and read its header
+        RecBuffer attrCatBlockBuf(attrCatRecId.block);
+        HeadInfo attrCatHeader;
+        attrCatBlockBuf.getHeader(&attrCatHeader);
+
+        // mark the slot as unoccupied in slotmap
+        unsigned char slotMap[attrCatHeader.numSlots];
+        attrCatBlockBuf.getSlotMap(slotMap);
+        slotMap[attrCatRecId.slot] = SLOT_UNOCCUPIED;
+        attrCatBlockBuf.setSlotMap(slotMap);
+
+        // update numEntries in header
+        attrCatHeader.numEntries--;
+        attrCatBlockBuf.setHeader(&attrCatHeader);
+
+        // update ATTRIBUTECAT's numRecs in cache
+        RelCatEntry attrCatEntry;
+        RelCacheTable::getRelCatEntry(ATTRCAT_RELID, &attrCatEntry);
+        attrCatEntry.numRecs--;
+        RelCacheTable::setRelCatEntry(ATTRCAT_RELID, &attrCatEntry);
+
+        // if block is now empty, release it
+        if (attrCatHeader.numEntries == 0)
+        {
+            // update linked list pointers
+            if (attrCatHeader.lblock != -1)
+            {
+                RecBuffer leftBlock(attrCatHeader.lblock);
+                HeadInfo leftHead;
+                leftBlock.getHeader(&leftHead);
+                leftHead.rblock = attrCatHeader.rblock;
+                leftBlock.setHeader(&leftHead);
+            }
+            else
+            {
+                // this was the first block — update firstBlk in cache
+                RelCatEntry attrRelEntry;
+                RelCacheTable::getRelCatEntry(ATTRCAT_RELID, &attrRelEntry);
+                attrRelEntry.firstBlk = attrCatHeader.rblock;
+                RelCacheTable::setRelCatEntry(ATTRCAT_RELID, &attrRelEntry);
+            }
+
+            if (attrCatHeader.rblock != -1)
+            {
+                RecBuffer rightBlock(attrCatHeader.rblock);
+                HeadInfo rightHead;
+                rightBlock.getHeader(&rightHead);
+                rightHead.lblock = attrCatHeader.lblock;
+                rightBlock.setHeader(&rightHead);
+            }
+            else
+            {
+                // this was the last block — update lastBlk in cache
+                RelCatEntry attrRelEntry;
+                RelCacheTable::getRelCatEntry(ATTRCAT_RELID, &attrRelEntry);
+                attrRelEntry.lastBlk = attrCatHeader.lblock;
+                RelCacheTable::setRelCatEntry(ATTRCAT_RELID, &attrRelEntry);
+            }
+
+            attrCatBlockBuf.releaseBlock();
+        }
+    }
+
+    /****** delete the entry from RELATIONCAT ******/
+    // mark the slot as unoccupied
+    unsigned char slotMap[SLOTMAP_SIZE_RELCAT_ATTRCAT];
+    relCatBlock.getSlotMap(slotMap);
+    slotMap[relCatRecId.slot] = SLOT_UNOCCUPIED;
+    relCatBlock.setSlotMap(slotMap);
+
+    // update numEntries in header
+    HeadInfo relCatHeader;
+    relCatBlock.getHeader(&relCatHeader);
+    relCatHeader.numEntries--;
+    relCatBlock.setHeader(&relCatHeader);
+
+    // update RELATIONCAT's numRecs in cache
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(RELCAT_RELID, &relCatEntry);
+    relCatEntry.numRecs--;
+    RelCacheTable::setRelCatEntry(RELCAT_RELID, &relCatEntry);
+
+    return SUCCESS;
+}

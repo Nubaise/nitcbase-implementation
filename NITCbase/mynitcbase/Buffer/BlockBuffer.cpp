@@ -324,3 +324,28 @@ int RecBuffer::setSlotMap(unsigned char *slotMap)
     StaticBuffer::setDirtyBit(this->blockNum);
     return SUCCESS;
 }
+
+// releases a block by marking it as free in blockAllocMap
+// and removing it from the buffer if present
+void BlockBuffer::releaseBlock()
+{
+    // if blockNum is invalid, nothing to release
+    if (blockNum < 0 || blockNum >= DISK_BLOCKS)
+    {
+        return;
+    }
+
+    // if the block is in the buffer, free that buffer slot
+    int bufferNum = StaticBuffer::getBufferNum(blockNum);
+    if (bufferNum >= 0)
+    {
+        // mark buffer slot as free
+        StaticBuffer::metainfo[bufferNum].free = true;
+    }
+
+    // mark block as free in block allocation map
+    StaticBuffer::blockAllocMap[blockNum] = UNUSED_BLK;
+
+    // set this object's blockNum to invalid
+    this->blockNum = INVALID_BLOCKNUM;
+}

@@ -80,3 +80,108 @@ int Schema::renameAttr(char relName[ATTR_SIZE], char currAttrName[ATTR_SIZE],
     int ret = BlockAccess::renameAttribute(relName, currAttrName, newAttrName);
     return ret;
 }
+
+int Schema::createRel(char relName[ATTR_SIZE], int numOfAttributes,
+                      char attributes[][ATTR_SIZE], int attributeTypes[])
+{
+
+    // cannot create relation with same name as catalogs
+    if (strcmp(relName, RELCAT_RELNAME) == 0 ||
+        strcmp(relName, ATTRCAT_RELNAME) == 0)
+    {
+        return E_NOTPERMITTED;
+    }
+
+    // check for duplicate attribute names
+    for (int i = 0; i < numOfAttributes; i++)
+    {
+        for (int j = i + 1; j < numOfAttributes; j++)
+        {
+            if (strcmp(attributes[i], attributes[j]) == 0)
+            {
+                return E_DUPLICATEATTR;
+            }
+        }
+    }
+
+    // check if relation already exists by searching RELATIONCAT
+    Attribute relNameAttr;
+    strcpy(relNameAttr.sVal, relName);
+    RelCacheTable::resetSearchIndex(RELCAT_RELID);
+
+    RecId relCatRecId = BlockAccess::linearSearch(
+        RELCAT_RELID, (char *)RELCAT_ATTR_RELNAME, relNameAttr, EQ);
+
+    if (relCatRecId.block != -1 && relCatRecId.slot != -1)
+    {
+        return E_RELEXIST;
+    }
+
+    // check max relations limit
+    // RELATIONCAT can hold max 20 entries, 2 are reserved for catalogs = 18 user relations
+    RelCatEntry relCatEntry;
+    RelCacheTable::getRelCatEntry(RELCAT_RELID, &relCatEntry);
+    if (relCatEntry.numRecs >= 18)
+    {
+        return E_MAXRELATIONS;
+    }
+
+    /*** insert a record into RELATIONCAT ***/
+    // numSlots = floor(2016 / (16 * numOfAttributes + 1))
+    int numSlots = 2016 / (16 * numOfAttributes + 1);
+
+    Attribute relCatRecord[RELCAT_NO_ATTRS];
+    strcpy(relCatRecord[RELCAT_REL_NAME_INDEX].sVal, relName);
+    relCatRecord[RELCAT_NO_ATTRIBUTES_INDEX].nVal = numOfAttributes;
+    relCatRecord[RELCAT_NO_RECORDS_INDEX].nVal = 0;
+    relCatRecord[RELCAT_FIRST_BLOCK_INDEX].nVal = -1;
+    relCatRecord[RELCAT_LAST_BLOCK_INDEX].nVal = -1;
+    relCatRecord[RELCAT_NO_SLOTS_PER_BLOCK_INDEX].nVal = numSlots;
+
+    int ret = BlockAccess::insert(RELCAT_RELID, relCatRecord);
+    if (ret != SUCCESS)
+    {
+        return ret;
+    }
+
+    /*** insert records into ATTRIBUTECAT for each attribute ***/
+    for (int i = 0; i < numOfAttributes; i++)
+    {
+        Attribute attrCatRecord[ATTRCAT_NO_ATTRS];
+        strcpy(attrCatRecord[ATTRCAT_REL_NAME_INDEX].sVal, relName);
+        strcpy(attrCatRecord[ATTRCAT_ATTR_NAME_INDEX].sVal, attributes[i]);
+        attrCatRecord[ATTRCAT_ATTR_TYPE_INDEX].nVal = attributeTypes[i];
+        attrCatRecord[ATTRCAT_PRIMARY_FLAG_INDEX].nVal = -1;
+        attrCatRecord[ATTRCAT_ROOT_BLOCK_INDEX].nVal = -1;
+        attrCatRecord[ATTRCAT_OFFSET_INDEX].nVal = i;
+
+        ret = BlockAccess::insert(ATTRCAT_RELID, attrCatRecord);
+        if (ret != SUCCESS)
+        {
+            // if insertion fails midway, we should ideally rollback
+            // but for now just return the error
+            return ret;
+        }
+    }
+
+    return SUCCESS;
+}
+
+int Schema::deleteRel(char relName[ATTR_SIZE])
+{
+    // cannot delete the catalogs
+    if (strcmp(relName, RELCAT_RELNAME) == 0 ||
+        strcmp(relName, ATTRCAT_RELNAME) == 0)
+    {
+        return E_NOTPERMITTED;
+    }
+
+    // relation must be closed before deleting
+    if (OpenRelTable::getRelId(relName) != E_RELNOTOPEN)
+    {
+        return E_RELOPEN;
+    }
+
+    // call Block Access Layer to delete the relation
+    return BlockAccess::deleteRelation(relName);
+}
